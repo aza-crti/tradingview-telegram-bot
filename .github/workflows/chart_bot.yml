@@ -7,7 +7,8 @@ on:
 
 jobs:
   run-bot:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10 # Pencegahan: Matikan otomatis jika skrip menggantung >10 menit
 
     steps:
     - name: Checkout Repository
@@ -17,15 +18,24 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
+        cache: 'pip' # Pencegahan: Caching dependency agar build lebih cepat & hemat kuota
 
-    - name: Install Dependencies
+    - name: Fix System Repositories & Install Dependencies
       run: |
-        python -m pip install --upgrade pip
+        sudo apt-get update --fix-missing
+        sudo apt-get install -y --no-install-recommends \
+          libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+          libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+          libxrandr2 libgbm1 libasound2 libpango-1.0-0 libcairo2
+
+    - name: Install Python Libraries
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
         pip install -r requirements.txt
 
-    - name: Install Playwright Browsers & Dependencies
+    - name: Install Playwright Chromium Browser
       run: |
-        python -m playwright install --with-deps chromium
+        python -m playwright install chromium
 
     - name: Run Chart Bot Script
       env:
