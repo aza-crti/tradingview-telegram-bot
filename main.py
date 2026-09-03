@@ -16,31 +16,41 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 TRADINGVIEW_URL = os.getenv("TRADINGVIEW_URL")
 
 async def capture_tradingview_chart(url: str, output_path: str = "chart.png"):
-    """Membuka TradingView, menunggu indikator render, lalu mengambil screenshot."""
+    """Membuka TradingView dengan konfigurasi anti-bot, menunggu render, lalu screenshot."""
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        # Tambahkan argumen anti-bot & bypass keamanan cloud
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage"
+            ]
+        )
+        
+        # Gunakan User-Agent Desktop nyata agar tidak diblokir TradingView/Cloudflare
         context = await browser.new_context(
             viewport={"width": 1920, "height": 1080},
-            device_scale_factor=2
+            device_scale_factor=2,
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         )
         page = await context.new_page()
 
         try:
             logging.info(f"Membuka URL TradingView: {url}")
-            await page.goto(url, wait_until="networkidle", timeout=60000)
+            # Gunakan domcontentloaded agar tidak nyangkut selamanya di networkidle
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
-            # Tunggu elemen canvas dimuat
-            await page.wait_for_selector("canvas", timeout=30000)
-            
-            # Jeda 10 detik agar indikator kustom selesai merender
-            logging.info("Menunggu render indikator kustom...")
-            await page.wait_for_timeout(10000)
+            # Beri jeda waktu yang cukup untuk WebSocket & indikator kustom merender data
+            logging.info("Menunggu kalkulasi indikator kustom selesai...")
+            await page.wait_for_timeout(15000)
 
-            # Inject CSS aman (sebaris tanpa newline)
-            css_hide = ".tv-header, .layout__area--left { display: none !important; visibility: hidden !important; }"
+            # Sembunyikan elemen UI TradingView yang mengganggu
+            css_hide = ".tv-header, .layout__area--left, #header-toolbar-screenshot { display: none !important; visibility: hidden !important; }"
             await page.add_style_tag(content=css_hide)
 
-            # Ambil screenshot dari elemen center atau full page
+            # Ambil screenshot area chart utama, fallback ke fullpage jika gagal
             chart_element = page.locator(".layout__area--center")
             if await chart_element.count() > 0:
                 await chart_element.screenshot(path=output_path)
@@ -51,7 +61,7 @@ async def capture_tradingview_chart(url: str, output_path: str = "chart.png"):
             return True
 
         except Exception as e:
-            logging.error(f"Gagal mengambil screenshot: {str(e)}")
+            logging.error(f"GAGAL PLAYWRIGHT: {str(e)}")
             return False
         finally:
             await browser.close()
@@ -73,7 +83,7 @@ async def main():
         sys.exit(1)
 
     image_file = "xauusd_chart.png"
-    caption = "📊 **Update Chart XAUUSD (1 Jam)**\nRender otomatis via GitHub Actions."
+    caption = "📊 **Update Chart XAUUSD (1 Jam)**\nIndikator kustom otomatis di-render."
 
     success = await capture_tradingview_chart(TRADINGVIEW_URL, image_file)
 
@@ -88,7 +98,7 @@ async def main():
         bot = Bot(token=TELEGRAM_BOT_TOKEN)
         await bot.send_message(
             chat_id=TELEGRAM_CHAT_ID, 
-            text="⚠️ **Warning Bot Chart:** Gagal mengambil screenshot TradingView pada jam ini."
+            text="⚠️ **Warning Bot Chart:** Gagal mengambil screenshot TradingView pada jam ini. Cek log GitHub Actions."
         )
 
 if __name__ == "__main__":
